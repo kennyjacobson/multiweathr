@@ -109,7 +109,8 @@ async fn main() -> io::Result<()> {
         );
     }
 
-    if !config.location.auto
+    if !config.is_rotating()
+        && !config.location.auto
         && config.location.latitude == config::default_latitude()
         && config.location.longitude == config::default_longitude()
         && !lat_from_env
@@ -118,8 +119,8 @@ async fn main() -> io::Result<()> {
         eprintln!("Warning: No location set, defaulting to Berlin (52.52, 13.41).");
     }
 
-    // Auto-detect location if enabled
-    if config.location.auto {
+    // Auto-detect location if enabled (rotating locations are always explicit)
+    if config.location.auto && !config.is_rotating() {
         info(config.silent, "Auto-detecting location...");
         match geolocation::detect_location().await {
             Ok(geo_loc) => {
@@ -151,7 +152,8 @@ async fn main() -> io::Result<()> {
     }
 
     // Resolve city name via reverse geocoding when needed but not yet known
-    if config.location.city.is_none()
+    if !config.is_rotating()
+        && config.location.city.is_none()
         && !config.location.hide
         && matches!(
             config.location.display,

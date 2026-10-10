@@ -56,6 +56,15 @@ impl AppState {
         self.weather_info_needs_update = true;
     }
 
+    /// Switches to another location, clearing the previous location's weather.
+    pub fn set_location(&mut self, location: WeatherLocation, city_name: Option<String>) {
+        self.location = location;
+        self.city_name = city_name;
+        self.current_weather = None;
+        self.is_offline = false;
+        self.weather_info_needs_update = true;
+    }
+
     pub fn set_offline_mode(&mut self, offline: bool) {
         self.is_offline = offline;
         self.weather_info_needs_update = true;

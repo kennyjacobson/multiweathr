@@ -1,6 +1,6 @@
 use crate::animation_manager::AnimationManager;
 use crate::app_state::AppState;
-use crate::config::{Config, Provider};
+use crate::config::{Config, LocationDisplay, Provider};
 use crate::error::WeatherError;
 use crate::render::TerminalRenderer;
 use crate::scene::overlay::OverlayRegistry;
@@ -18,7 +18,7 @@ use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use serde::Deserialize;
 use std::io;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(300);
@@ -87,6 +87,28 @@ fn resolve_theme_bindings(
     }
 }
 
+/// Picks the scene a location asked for, or the theme's scene when it named none
+/// or named one that isn't registered.
+fn resolve_location_scene(
+    requested: Option<&str>,
+    fallback: &'static str,
+    scenes: &SceneRegistry,
+) -> &'static str {
+    match requested {
+        None => fallback,
+        Some(id) => match scenes.get(id) {
+            Some(scene) => scene.id(),
+            None => {
+                eprintln!(
+                    "Warning: scene '{}' is not registered, falling back to '{}'.",
+                    id, fallback
+                );
+                fallback
+            }
+        },
+    }
+}
+
 fn generate_offline_weather(rng: &mut impl rand::Rng) -> WeatherData {
     use chrono::{Local, Timelike};
     use rand::RngExt;
@@ -121,15 +143,27 @@ fn generate_offline_weather(rng: &mut impl rand::Rng) -> WeatherData {
     }
 }
 
+/// A location the app shows, with the latest weather fetched for it.
+struct LocationSlot {
+    location: WeatherLocation,
+    city_name: Option<String>,
+    scene_id: &'static str,
+    weather: Option<WeatherData>,
+    error: Option<String>,
+}
+
 pub struct App {
     state: AppState,
     animations: AnimationManager,
     scenes: SceneRegistry,
     overlays: OverlayRegistry,
     themes: ThemeRegistry,
-    active_scene_id: &'static str,
     active_overlay_id: Option<&'static str>,
-    weather_receiver: mpsc::Receiver<Result<WeatherData, WeatherError>>,
+    slots: Vec<LocationSlot>,
+    current_slot: usize,
+    rotate_interval: Duration,
+    last_rotation: Instant,
+    weather_receiver: mpsc::Receiver<(usize, Result<WeatherData, WeatherError>)>,
     hide_hud: bool,
 }
 
@@ -143,28 +177,63 @@ impl App {
         term_height: u16,
         themes: ThemeRegistry,
     ) -> Self {
-        let location = WeatherLocation {
-            latitude: config.location.latitude,
-            longitude: config.location.longitude,
-            elevation: None,
-        };
-
-        let mut state = AppState::new(
-            location,
-            config.location.city.clone(),
-            config.location.display,
-            config.location.hide,
-            config.units,
-        );
-        let mut animations = AnimationManager::new(term_width, term_height, show_leaves);
-
         let mut scenes = SceneRegistry::new();
         scenes.register(Box::new(WorldScene::new(term_width, term_height)));
 
         let overlays = OverlayRegistry::new();
         let bindings = resolve_theme_bindings(&themes, &scenes, &overlays);
 
-        let (tx, rx) = mpsc::channel(1);
+        let mut slots: Vec<LocationSlot> = if config.is_rotating() {
+            config
+                .locations
+                .iter()
+                .map(|loc| LocationSlot {
+                    location: WeatherLocation {
+                        latitude: loc.latitude,
+                        longitude: loc.longitude,
+                        elevation: None,
+                    },
+                    city_name: loc.name.clone(),
+                    scene_id: resolve_location_scene(
+                        loc.scene.as_deref(),
+                        bindings.scene_id,
+                        &scenes,
+                    ),
+                    weather: None,
+                    error: None,
+                })
+                .collect()
+        } else {
+            vec![LocationSlot {
+                location: WeatherLocation {
+                    latitude: config.location.latitude,
+                    longitude: config.location.longitude,
+                    elevation: None,
+                },
+                city_name: config.location.city.clone(),
+                scene_id: bindings.scene_id,
+                weather: None,
+                error: None,
+            }]
+        };
+
+        // Rotating locations are labelled by name, falling back to coordinates.
+        let location_display = if config.is_rotating() {
+            LocationDisplay::City
+        } else {
+            config.location.display
+        };
+
+        let state = AppState::new(
+            slots[0].location,
+            slots[0].city_name.clone(),
+            location_display,
+            config.location.hide,
+            config.units,
+        );
+        let animations = AnimationManager::new(term_width, term_height, show_leaves);
+
+        let (tx, rx) = mpsc::channel(slots.len());
 
         if let Some(ref condition_str) = simulate_condition {
             let simulated_condition =
@@ -195,15 +264,9 @@ impl App {
                 attribution: "".to_string(),
             };
 
-            let rain_intensity = weather.condition.rain_intensity();
-            let snow_intensity = weather.condition.snow_intensity();
-            let wind_speed = weather.wind_speed;
-            let wind_direction = weather.wind_direction;
-
-            state.update_weather(weather);
-            animations.update_rain_intensity(rain_intensity);
-            animations.update_snow_intensity(snow_intensity);
-            animations.update_wind(wind_speed as f32, wind_direction as f32);
+            for slot in &mut slots {
+                slot.weather = Some(weather.clone());
+            }
         } else {
             let wanted_provider = config
                 .provider
@@ -226,33 +289,107 @@ impl App {
                 }
             };
 
-            let weather_client = WeatherClient::new(provider, REFRESH_INTERVAL);
             let units = config.units;
 
-            tokio::spawn(async move {
-                loop {
-                    let result = weather_client
-                        .get_current_weather(&location, &units, wanted_provider)
-                        .await;
-                    if tx.send(result).await.is_err() {
-                        break;
+            // One fetch loop per location, so rotating never waits on the network.
+            for (index, slot) in slots.iter().enumerate() {
+                let weather_client = WeatherClient::new(provider.clone(), REFRESH_INTERVAL);
+                let location = slot.location;
+                let tx = tx.clone();
+
+                tokio::spawn(async move {
+                    loop {
+                        let result = weather_client
+                            .get_current_weather(&location, &units, wanted_provider)
+                            .await;
+                        if tx.send((index, result)).await.is_err() {
+                            break;
+                        }
+                        tokio::time::sleep(REFRESH_INTERVAL).await;
                     }
-                    tokio::time::sleep(REFRESH_INTERVAL).await;
-                }
-            });
+                });
+            }
         }
 
-        Self {
+        let mut app = Self {
             state,
             animations,
             scenes,
             overlays,
             themes,
-            active_scene_id: bindings.scene_id,
             active_overlay_id: bindings.overlay_id,
+            slots,
+            current_slot: 0,
+            rotate_interval: Duration::from_secs(config.rotate_seconds()),
+            last_rotation: Instant::now(),
             weather_receiver: rx,
             hide_hud: config.hide_hud,
+        };
+
+        if simulate_condition.is_some() {
+            app.show_current_slot(&mut rand::rng());
         }
+
+        app
+    }
+
+    fn apply_weather(&mut self, weather: WeatherData) {
+        let rain_intensity = weather.condition.rain_intensity();
+        let snow_intensity = weather.condition.snow_intensity();
+        let fog_intensity = weather.condition.fog_intensity();
+        let wind_speed = weather.wind_speed;
+        let wind_direction = weather.wind_direction;
+
+        if let Some(moon_phase) = weather.moon_phase {
+            self.animations.update_moon_phase(moon_phase);
+        }
+
+        self.state.update_weather(weather);
+        self.animations.update_rain_intensity(rain_intensity);
+        self.animations.update_snow_intensity(snow_intensity);
+        self.animations.update_fog_intensity(fog_intensity);
+        self.animations
+            .update_wind(wind_speed as f32, wind_direction as f32);
+    }
+
+    /// Shows the current slot's latest weather and returns the attribution text.
+    fn show_current_slot(&mut self, rng: &mut impl rand::Rng) -> String {
+        let slot = &self.slots[self.current_slot];
+        let weather = slot.weather.clone();
+        let error = slot.error.clone();
+
+        match (weather, error) {
+            (Some(weather), error) => {
+                let attribution = weather.attribution.clone();
+                self.apply_weather(weather);
+                match error {
+                    Some(error_msg) => {
+                        self.state.set_offline_mode(true);
+                        format!("Provider failed with {error_msg}")
+                    }
+                    None => attribution,
+                }
+            }
+            (None, Some(error_msg)) => {
+                self.apply_weather(generate_offline_weather(rng));
+                self.state.set_offline_mode(true);
+                format!("Provider failed with {error_msg} - Simulating")
+            }
+            (None, None) => "Awaiting weather data".to_string(),
+        }
+    }
+
+    /// Moves `offset` slots forward (or back, when negative) and returns the
+    /// attribution text for the newly shown location.
+    fn switch_slot(&mut self, offset: isize, rng: &mut impl rand::Rng) -> String {
+        let len = self.slots.len() as isize;
+        self.current_slot = (self.current_slot as isize + offset).rem_euclid(len) as usize;
+        self.last_rotation = Instant::now();
+
+        let slot = &self.slots[self.current_slot];
+        self.state
+            .set_location(slot.location, slot.city_name.clone());
+        self.show_current_slot(rng)
     }
 
     pub async fn run(&mut self, renderer: &mut TerminalRenderer) -> io::Result<()> {
@@ -261,59 +398,34 @@ impl App {
 
         loop {
             match self.weather_receiver.try_recv() {
-                Ok(result) => match result {
-                    Ok(weather) => {
-                        let rain_intensity = weather.condition.rain_intensity();
-                        let snow_intensity = weather.condition.snow_intensity();
-                        let fog_intensity = weather.condition.fog_intensity();
-                        let wind_speed = weather.wind_speed;
-                        let wind_direction = weather.wind_direction;
-                        attribution = weather.attribution.clone();
-
-                        if let Some(moon_phase) = weather.moon_phase {
-                            self.animations.update_moon_phase(moon_phase);
+                Ok((index, result)) => {
+                    let slot = &mut self.slots[index];
+                    match result {
+                        Ok(weather) => {
+                            slot.weather = Some(weather);
+                            slot.error = None;
                         }
-
-                        self.state.update_weather(weather);
-                        self.animations.update_rain_intensity(rain_intensity);
-                        self.animations.update_snow_intensity(snow_intensity);
-                        self.animations.update_fog_intensity(fog_intensity);
-                        self.animations
-                            .update_wind(wind_speed as f32, wind_direction as f32);
-                    }
-                    Err(error) => {
-                        let error_msg = match &error {
-                            WeatherError::Network(net_err) => net_err.user_friendly_message(),
-                            _ => format!("Failed to fetch weather: {}", error),
-                        };
-
-                        if self.state.current_weather.is_none() {
-                            attribution = format!("Provider failed with {error_msg} - Simulating");
-                            let offline_weather = generate_offline_weather(&mut rng);
-                            let rain_intensity = offline_weather.condition.rain_intensity();
-                            let snow_intensity = offline_weather.condition.snow_intensity();
-                            let fog_intensity = offline_weather.condition.fog_intensity();
-                            let wind_speed = offline_weather.wind_speed;
-                            let wind_direction = offline_weather.wind_direction;
-
-                            self.state.update_weather(offline_weather);
-                            self.state.set_offline_mode(true);
-                            self.animations.update_rain_intensity(rain_intensity);
-                            self.animations.update_snow_intensity(snow_intensity);
-                            self.animations.update_fog_intensity(fog_intensity);
-                            self.animations
-                                .update_wind(wind_speed as f32, wind_direction as f32);
-                        } else {
-                            self.state.set_offline_mode(true);
-                            attribution = format!("Provider failed with {error_msg}");
+                        Err(error) => {
+                            slot.error = Some(match &error {
+                                WeatherError::Network(net_err) => net_err.user_friendly_message(),
+                                _ => format!("Failed to fetch weather: {}", error),
+                            });
                         }
                     }
-                },
+
+                    if index == self.current_slot {
+                        attribution = self.show_current_slot(&mut rng);
+                    }
+                }
                 Err(e) => {
                     if e == mpsc::error::TryRecvError::Disconnected {
                         attribution = "".to_string();
                     }
                 }
+            }
+
+            if self.slots.len() > 1 && self.last_rotation.elapsed() >= self.rotate_interval {
+                attribution = self.switch_slot(1, &mut rng);
             }
 
             renderer.clear()?;
@@ -324,7 +436,7 @@ impl App {
             let (term_width, term_height) = renderer.get_size();
             let scene = self
                 .scenes
-                .get_mut(self.active_scene_id)
+                .get_mut(self.slots[self.current_slot].scene_id)
                 .expect("active scene must be registered");
             scene.update_size(term_width, term_height);
 
@@ -407,6 +519,12 @@ impl App {
                             if key_event.modifiers.contains(KeyModifiers::CONTROL) =>
                         {
                             break;
+                        }
+                        KeyCode::Char('n') | KeyCode::Right if self.slots.len() > 1 => {
+                            attribution = self.switch_slot(1, &mut rng);
+                        }
+                        KeyCode::Char('p') | KeyCode::Left if self.slots.len() > 1 => {
+                            attribution = self.switch_slot(-1, &mut rng);
                         }
                         _ => {}
                     },

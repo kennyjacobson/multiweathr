@@ -170,6 +170,9 @@ pub enum ConfigError {
     InvalidEnvVar { name: &'static str, value: String },
     #[error("invalid API Key ({0})")]
     InvalidAPIKey(String),
+
+    #[error("invalid rotate_seconds (must be at least 1)")]
+    InvalidRotateSeconds,
 }
 
 impl ConfigError {
@@ -183,6 +186,7 @@ impl ConfigError {
             ConfigError::InvalidLongitude(_) => "InvalidLongitude",
             ConfigError::InvalidEnvVar { .. } => "InvalidEnvVar",
             ConfigError::InvalidAPIKey(_) => "InvalidAPIKey",
+            ConfigError::InvalidRotateSeconds => "InvalidRotateSeconds",
         }
     }
 }

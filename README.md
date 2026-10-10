@@ -256,6 +256,29 @@ latitude = -33.8688
 longitude = 151.2093
 ```
 
+### Rotating Locations
+
+List several `[[locations]]` to cycle through them, one every `rotate_seconds` (default 30).
+Weather is fetched for all of them in the background. When `[[locations]]` is present, the
+single `[location]` table is ignored.
+
+```toml
+rotate_seconds = 30
+
+[[locations]]
+name = "Berlin"          # shown in the HUD; coordinates are shown when omitted
+latitude = 52.52
+longitude = 13.41
+
+[[locations]]
+name = "Tokyo"
+latitude = 35.6762
+longitude = 139.6503
+scene = "world"          # optional; defaults to the theme's scene
+```
+
+Press `n` / `→` for the next location and `p` / `←` for the previous one.
+
 ## Usage
 
 Run with real-time weather:

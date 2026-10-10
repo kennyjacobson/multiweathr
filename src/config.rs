@@ -11,6 +11,7 @@ use crate::weather::types::WeatherUnits;
 pub const ENV_LATITUDE: &str = "WEATHR_LATITUDE";
 pub const ENV_LONGITUDE: &str = "WEATHR_LONGITUDE";
 pub const DEFAULT_THEME: &str = "default";
+pub const DEFAULT_ROTATE_SECONDS: u64 = 30;
 
 #[derive(Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -35,6 +36,24 @@ pub struct Config {
     pub provider: HashMap<Provider, Table>,
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Seconds to show each entry of `locations` before switching to the next.
+    #[serde(default)]
+    pub rotate_seconds: Option<u64>,
+    /// Several locations to rotate through. When empty, `location` is used.
+    #[serde(default)]
+    pub locations: Vec<RotatingLocation>,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct RotatingLocation {
+    /// Name shown in the HUD. Coordinates are shown when it is missing.
+    #[serde(default)]
+    pub name: Option<String>,
+    pub latitude: f64,
+    pub longitude: f64,
+    /// Scene to draw for this location. Defaults to the theme's scene.
+    #[serde(default)]
+    pub scene: Option<String>,
 }
 
 fn default_theme() -> String {
@@ -92,6 +111,18 @@ impl Default for Location {
     }
 }
 
+fn validate_coordinates(latitude: f64, longitude: f64) -> Result<(), ConfigError> {
+    if !(-90.0..=90.0).contains(&latitude) {
+        return Err(ConfigError::InvalidLatitude(latitude));
+    }
+
+    if !(-180.0..=180.0).contains(&longitude) {
+        return Err(ConfigError::InvalidLongitude(longitude));
+    }
+
+    Ok(())
+}
+
 impl Config {
     pub fn load() -> Result<Self, ConfigError> {
         let config_path = Self::get_config_path()?;
@@ -147,15 +178,25 @@ impl Config {
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
-        if self.location.latitude < -90.0 || self.location.latitude > 90.0 {
-            return Err(ConfigError::InvalidLatitude(self.location.latitude));
+        validate_coordinates(self.location.latitude, self.location.longitude)?;
+
+        for location in &self.locations {
+            validate_coordinates(location.latitude, location.longitude)?;
         }
 
-        if self.location.longitude < -180.0 || self.location.longitude > 180.0 {
-            return Err(ConfigError::InvalidLongitude(self.location.longitude));
+        if self.rotate_seconds == Some(0) {
+            return Err(ConfigError::InvalidRotateSeconds);
         }
 
         Ok(())
+    }
+
+    pub fn is_rotating(&self) -> bool {
+        !self.locations.is_empty()
+    }
+
+    pub fn rotate_seconds(&self) -> u64 {
+        self.rotate_seconds.unwrap_or(DEFAULT_ROTATE_SECONDS)
     }
 
     pub fn normalized_theme(&self) -> &str {
@@ -367,6 +408,7 @@ longitude = 0.0
             silent: false,
             provider: HashMap::new(),
             theme: "default".to_string(),
+            ..Config::default()
         };
         let result = config.validate();
         assert!(result.is_err());
@@ -390,6 +432,7 @@ longitude = 0.0
             silent: false,
             provider: HashMap::new(),
             theme: "default".to_string(),
+            ..Config::default()
         };
         let result = config.validate();
         assert!(result.is_err());
@@ -413,6 +456,7 @@ longitude = 0.0
             silent: false,
             provider: HashMap::new(),
             theme: "default".to_string(),
+            ..Config::default()
         };
         let result = config.validate();
         assert!(result.is_err());
@@ -436,6 +480,7 @@ longitude = 0.0
             silent: false,
             provider: HashMap::new(),
             theme: "default".to_string(),
+            ..Config::default()
         };
         let result = config.validate();
         assert!(result.is_err());
@@ -459,6 +504,7 @@ longitude = 0.0
             silent: false,
             provider: HashMap::new(),
             theme: "default".to_string(),
+            ..Config::default()
         };
         let result = config.validate();
         assert!(result.is_ok());
@@ -732,5 +778,71 @@ auto = false
             env::remove_var("WEATHR_LATITUDE");
             env::remove_var("WEATHR_LONGITUDE");
         }
+    }
+
+    #[test]
+    fn test_locations_default_empty() {
+        let toml_content = r#"
+[location]
+latitude = 0.0
+longitude = 0.0
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(!config.is_rotating());
+        assert_eq!(config.rotate_seconds(), DEFAULT_ROTATE_SECONDS);
+    }
+
+    #[test]
+    fn test_locations_list() {
+        let toml_content = r#"
+rotate_seconds = 45
+
+[[locations]]
+name = "Salt Lake City, UT"
+latitude = 40.7608
+longitude = -111.8910
+scene = "city"
+
+[[locations]]
+latitude = 30.2752
+longitude = -98.8720
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.is_rotating());
+        assert_eq!(config.rotate_seconds(), 45);
+        assert_eq!(config.locations.len(), 2);
+        assert_eq!(
+            config.locations[0],
+            RotatingLocation {
+                name: Some("Salt Lake City, UT".to_string()),
+                latitude: 40.7608,
+                longitude: -111.8910,
+                scene: Some("city".to_string()),
+            }
+        );
+        assert_eq!(config.locations[1].name, None);
+        assert_eq!(config.locations[1].scene, None);
+    }
+
+    #[test]
+    fn test_validation_invalid_rotating_location() {
+        let toml_content = r#"
+[[locations]]
+latitude = 95.0
+longitude = 0.0
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let result = config.validate();
+        assert_eq!(result.unwrap_err().kind(), "InvalidLatitude");
+    }
+
+    #[test]
+    fn test_validation_zero_rotate_seconds() {
+        let config = Config {
+            rotate_seconds: Some(0),
+            ..Config::default()
+        };
+        let result = config.validate();
+        assert_eq!(result.unwrap_err().kind(), "InvalidRotateSeconds");
     }
 }
