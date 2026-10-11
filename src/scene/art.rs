@@ -131,6 +131,36 @@ pub fn place_outward<P: Copy>(
     placed
 }
 
+/// Draws `rows` rows of water starting at `y`. `travel` is how many columns
+/// the waves have drifted right so far; nearer (lower) rows drift further, for
+/// a sense of depth.
+/// `seed` keeps different bodies of water from looking identical.
+pub fn render_water(
+    renderer: &mut TerminalRenderer,
+    screen_width: u16,
+    y: u16,
+    rows: u16,
+    travel: f64,
+    colors: &[Color; 3],
+    seed: u16,
+) -> io::Result<()> {
+    for row in 0..rows {
+        let offset = (travel * (1.0 + row as f64 * 0.35)) as u64 as u16;
+        for x in 0..screen_width {
+            let sample = x.wrapping_sub(offset);
+            let ch = match hash(sample, seed + 100 + row) {
+                0..=21 => '~',
+                22..=29 => '-',
+                30..=33 => '.',
+                _ => ' ',
+            };
+            let color = colors[hash(sample, seed + 200 + row) as usize % colors.len()];
+            renderer.render_char(x, y + row, ch, color)?;
+        }
+    }
+    Ok(())
+}
+
 /// Average columns between mountain peaks.
 const PEAK_SPACING: u16 = 18;
 

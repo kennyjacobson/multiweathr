@@ -5,7 +5,7 @@ use crate::scene::art::{
     MountainColors, art_height, art_width, hash, place_outward, render_art_clipped,
     render_art_opaque, render_mountains,
 };
-use crate::scene::{Scene, SceneContext, SceneLayout};
+use crate::scene::{Scene, SceneContext, SceneLayout, palm};
 use crossterm::style::Color;
 use std::io;
 use std::time::Instant;
@@ -14,13 +14,6 @@ use style::SuburbSceneStyle;
 const HOUSE_ASCII: &str = include_str!("assets/house.txt");
 const NEIGHBOR_ASCII: &str = include_str!("assets/neighbor.txt");
 const JACARANDA_ASCII: &str = include_str!("assets/jacaranda.txt");
-const PALM_TRUNK_ASCII: &str = include_str!("assets/palm_trunk.txt");
-/// Palm crowns: still, a light breeze, and a strong wind.
-const PALM_CROWNS: [&str; 3] = [
-    include_str!("assets/palm_calm.txt"),
-    include_str!("assets/palm_wind_1.txt"),
-    include_str!("assets/palm_wind_2.txt"),
-];
 const SADDLEBACK_ASCII: &str = include_str!("assets/saddleback.txt");
 const CAR_ASCII: &str = include_str!("assets/car.txt");
 
@@ -30,14 +23,6 @@ const HILLS_MAX_HEIGHT: u16 = 5;
 const SADDLEBACK_X_OFFSET: i32 = 6;
 /// How far Saddleback's base is raised above the street, at most.
 const SADDLEBACK_MAX_LIFT: u16 = 4;
-/// Below this wind speed (m/s, about 2 mph) the palms stand still.
-const PALM_CALM_MS: f64 = 1.0;
-/// From this wind speed (m/s, about 11 mph) the palms thrash in the wind.
-const PALM_STRONG_MS: f64 = 5.0;
-/// Sway frame time is this divided by the wind speed in m/s.
-const PALM_SPEED_FACTOR: f64 = 2000.0;
-/// Fastest and slowest sway frame times, in milliseconds.
-const PALM_FRAME_MS_RANGE: (f64, f64) = (150.0, 1200.0);
 /// A car drives by once per this many seconds...
 const CAR_PERIOD_SECS: f64 = 25.0;
 /// ...moving this many columns per second.
@@ -74,11 +59,7 @@ const RIGHT_PROPS: [Prop; 6] = [
 impl Prop {
     fn width(self) -> u16 {
         match self {
-            Prop::Palm => PALM_CROWNS
-                .iter()
-                .map(|crown| art_width(crown))
-                .max()
-                .unwrap_or(0),
+            Prop::Palm => palm::width(),
             Prop::Jacaranda => art_width(JACARANDA_ASCII),
             Prop::Neighbor => art_width(NEIGHBOR_ASCII),
         }
@@ -192,27 +173,6 @@ impl SuburbScene {
             'o' => style.brass,
             '.' | '-' => style.trim,
             _ => paint.stucco,
-        })
-    }
-
-    fn render_palm(
-        &self,
-        renderer: &mut TerminalRenderer,
-        x: u16,
-        ground_y: u16,
-        wind_speed_ms: f64,
-        style: &SuburbSceneStyle,
-    ) -> io::Result<()> {
-        let trunk_y = ground_y.saturating_sub(art_height(PALM_TRUNK_ASCII));
-        render_art_opaque(renderer, PALM_TRUNK_ASCII, x, trunk_y, |_, _| {
-            style.palm_trunk
-        })?;
-
-        let crown = PALM_CROWNS[palm_crown(wind_speed_ms, self.started.elapsed().as_millis())];
-        let crown_y = trunk_y.saturating_sub(art_height(crown));
-        render_art_clipped(renderer, crown, x as i32, crown_y, |_, ch| match ch {
-            '|' => style.palm_trunk,
-            _ => style.frond,
         })
     }
 
@@ -345,7 +305,15 @@ impl Scene for SuburbScene {
         );
         for (prop, x) in props {
             match prop {
-                Prop::Palm => self.render_palm(renderer, x, ground_y, ctx.wind_speed_ms, &style)?,
+                Prop::Palm => palm::render_palm(
+                    renderer,
+                    x,
+                    ground_y,
+                    ctx.wind_speed_ms,
+                    self.started.elapsed().as_millis(),
+                    style.frond,
+                    style.palm_trunk,
+                )?,
                 Prop::Jacaranda => {
                     let y = ground_y.saturating_sub(art_height(JACARANDA_ASCII));
                     render_art_opaque(renderer, JACARANDA_ASCII, x, y, |_, ch| match ch {
@@ -372,45 +340,9 @@ impl Scene for SuburbScene {
     }
 }
 
-/// Which palm crown to show: still when calm, swaying between the still and
-/// breezy crowns in light wind, and thrashing between the two windy crowns in
-/// strong wind. Faster wind sways faster.
-fn palm_crown(wind_speed_ms: f64, elapsed_ms: u128) -> usize {
-    if wind_speed_ms < PALM_CALM_MS {
-        return 0;
-    }
-    let (fastest, slowest) = PALM_FRAME_MS_RANGE;
-    let frame_ms = (PALM_SPEED_FACTOR / wind_speed_ms).clamp(fastest, slowest) as u128;
-    let swing = (elapsed_ms / frame_ms) as usize % 2;
-    if wind_speed_ms < PALM_STRONG_MS {
-        swing
-    } else {
-        1 + swing
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn palm_crowns_sit_on_the_trunk() {
-        let trunk_x = PALM_TRUNK_ASCII.lines().next().unwrap().find(')');
-        for crown in PALM_CROWNS {
-            let hub = crown.lines().find_map(|line| line.find("\\|/"));
-            assert_eq!(hub.map(|x| x + 1), trunk_x);
-        }
-    }
-
-    #[test]
-    fn palms_sway_more_in_stronger_wind() {
-        assert_eq!(palm_crown(0.0, 0), 0);
-        assert_eq!(palm_crown(0.0, 5000), 0);
-        let breezy: Vec<usize> = (0..20).map(|t| palm_crown(3.0, t * 100)).collect();
-        assert!(breezy.contains(&0) && breezy.contains(&1) && !breezy.contains(&2));
-        let windy: Vec<usize> = (0..20).map(|t| palm_crown(10.0, t * 100)).collect();
-        assert!(windy.contains(&1) && windy.contains(&2) && !windy.contains(&0));
-    }
 
     #[test]
     fn house_roof_ends_at_the_eaves() {

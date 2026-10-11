@@ -3,7 +3,7 @@ mod style;
 use crate::render::TerminalRenderer;
 use crate::scene::art::{
     MountainColors, art_height, art_width, hash, place_outward, render_art_clipped,
-    render_art_opaque, render_mountains,
+    render_art_opaque, render_mountains, render_water,
 };
 use crate::scene::{ChimneyPosition, Scene, SceneContext, SceneLayout};
 use std::io;
@@ -132,26 +132,15 @@ impl LakeHouseScene {
             renderer.render_char(x, ground_y + 1, ch, style.sand)?;
         }
 
-        let elapsed = self.started.elapsed().as_secs_f64();
-        let drift = wave_drift(wind_speed_ms);
-        for row in 0..Self::GROUND_HEIGHT - SHORE_ROWS {
-            // Nearer rows (lower on screen) move faster, for a sense of depth.
-            let offset = (elapsed * drift * (1.0 + row as f64 * 0.35)) as u64 as u16;
-            let y = ground_y + SHORE_ROWS + row;
-            for x in 0..self.width {
-                let sample = x.wrapping_sub(offset);
-                let ch = match hash(sample, 100 + row) {
-                    0..=21 => '~',
-                    22..=29 => '-',
-                    30..=33 => '.',
-                    _ => ' ',
-                };
-                let color = style.water[hash(sample, 200 + row) as usize % 3];
-                renderer.render_char(x, y, ch, color)?;
-            }
-        }
-
-        Ok(())
+        render_water(
+            renderer,
+            self.width,
+            ground_y + SHORE_ROWS,
+            Self::GROUND_HEIGHT - SHORE_ROWS,
+            self.started.elapsed().as_secs_f64() * wave_drift(wind_speed_ms),
+            &style.water,
+            0,
+        )
     }
 
     fn render_boat(
