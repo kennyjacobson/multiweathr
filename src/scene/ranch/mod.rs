@@ -1,8 +1,8 @@
 mod style;
 
 use crate::render::TerminalRenderer;
+use crate::scene::art::{art_height, art_width, hash, place_outward, render_art};
 use crate::scene::{ChimneyPosition, Scene, SceneContext, SceneLayout};
-use crossterm::style::Color;
 use std::io;
 use std::ops::Range;
 use std::time::Instant;
@@ -92,47 +92,6 @@ impl RanchScene {
         let house_x = (self.width / 2).saturating_sub(art_width(HOUSE_ASCII) / 2);
         let house_y = ground_y.saturating_sub(art_height(HOUSE_ASCII));
         (house_x, house_y)
-    }
-
-    /// Lays props out from the house toward each screen edge, returning each
-    /// prop with its x. A prop that doesn't fit is skipped for the next one;
-    /// layout stops once none fit.
-    fn place_props(&self, house_x: u16, house_width: u16) -> Vec<(Prop, u16)> {
-        let mut placed = Vec::new();
-
-        let mut edge = house_x;
-        let mut misses = 0;
-        for prop in LEFT_PROPS.iter().cycle() {
-            if misses == LEFT_PROPS.len() {
-                break;
-            }
-            let needed = PROP_GAP + prop.width();
-            if edge > needed {
-                edge -= needed;
-                placed.push((*prop, edge));
-                misses = 0;
-            } else {
-                misses += 1;
-            }
-        }
-
-        let mut edge = house_x + house_width;
-        let mut misses = 0;
-        for prop in RIGHT_PROPS.iter().cycle() {
-            if misses == RIGHT_PROPS.len() {
-                break;
-            }
-            let x = edge + PROP_GAP;
-            if x + prop.width() < self.width {
-                placed.push((*prop, x));
-                edge = x + prop.width();
-                misses = 0;
-            } else {
-                misses += 1;
-            }
-        }
-
-        placed
     }
 
     /// Draws the grass and soil. `occupied` lists column ranges where something
@@ -278,7 +237,15 @@ impl Scene for RanchScene {
         let house_width = art_width(HOUSE_ASCII);
         let style = RanchSceneStyle::resolve(ctx);
 
-        let props = self.place_props(house_x, house_width);
+        let props = place_outward(
+            &LEFT_PROPS,
+            &RIGHT_PROPS,
+            Prop::width,
+            house_x,
+            house_width,
+            self.width,
+            PROP_GAP,
+        );
 
         let occupied: Vec<Range<u16>> = std::iter::once(house_x..house_x + house_width)
             .chain(props.iter().map(|&(prop, x)| x..x + prop.width()))
@@ -312,44 +279,6 @@ fn windmill_frame_ms(wind_speed_ms: f64) -> Option<u128> {
     }
     let (fastest, slowest) = WINDMILL_FRAME_MS_RANGE;
     Some((WINDMILL_SPEED_FACTOR / wind_speed_ms).clamp(fastest, slowest) as u128)
-}
-
-fn art_width(ascii: &str) -> u16 {
-    ascii
-        .lines()
-        .map(|line| line.chars().count())
-        .max()
-        .unwrap_or(0) as u16
-}
-
-fn art_height(ascii: &str) -> u16 {
-    ascii.lines().count() as u16
-}
-
-/// Draws ASCII art with its top-left corner at (x, y), leaving spaces transparent.
-/// `color` picks a color from the row within the art and the character.
-fn render_art(
-    renderer: &mut TerminalRenderer,
-    ascii: &str,
-    x: u16,
-    y: u16,
-    color: impl Fn(usize, char) -> Color,
-) -> io::Result<()> {
-    for (i, line) in ascii.lines().enumerate() {
-        for (j, ch) in line.chars().enumerate() {
-            if ch != ' ' {
-                renderer.render_char(x + j as u16, y + i as u16, ch, color(i, ch))?;
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Cheap, stable per-cell noise in 0..100 so the ground doesn't flicker.
-fn hash(x: u16, y: u16) -> u32 {
-    let mut h = (x as u32).wrapping_mul(374_761_393) ^ (y as u32).wrapping_mul(668_265_263);
-    h = (h ^ (h >> 13)).wrapping_mul(1_274_126_177);
-    (h ^ (h >> 16)) % 100
 }
 
 #[cfg(test)]

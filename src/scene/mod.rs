@@ -1,3 +1,5 @@
+pub mod art;
+pub mod lake_house;
 pub mod overlay;
 pub mod ranch;
 pub mod world;
