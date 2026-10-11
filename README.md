@@ -321,6 +321,8 @@ scene = "world"          # optional; defaults to the theme's scene
 
 Press `n` / `→` for the next location and `p` / `←` for the previous one.
 
+For a full example that uses every scene, see [`docs/sample-config.toml`](docs/sample-config.toml).
+
 ### Scenes
 
 Set `scene` on a `[[locations]]` entry to pick what's drawn behind the weather.

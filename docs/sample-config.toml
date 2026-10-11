@@ -1,0 +1,49 @@
+# Sample multiweathr config that shows off every scene.
+# Copy it to ~/.config/weathr/config.toml (Linux) and swap in your own cities.
+
+# Seconds to show each city before moving to the next one.
+rotate_seconds = 30
+
+# Days of forecast on the second HUD line, starting with today. 0 hides it.
+forecast_days = 5
+
+[units]
+temperature = "fahrenheit"
+wind_speed = "mph"
+precipitation = "inch"
+
+[[locations]]
+name = "Orange County, CA"
+latitude = 33.7175
+longitude = -117.8311
+scene = "suburb"
+
+[[locations]]
+name = "Salt Lake City, UT"
+latitude = 40.7608
+longitude = -111.8910
+scene = "city"
+
+[[locations]]
+name = "Lake Tahoe, CA"
+latitude = 38.9399
+longitude = -119.9772
+scene = "lake-house"
+
+[[locations]]
+name = "Austin, TX"
+latitude = 30.2672
+longitude = -97.7431
+scene = "ranch"
+
+[[locations]]
+name = "Huntington Beach, CA"
+latitude = 33.6595
+longitude = -117.9988
+scene = "beach"
+
+[[locations]]
+name = "Tulsa, OK"
+latitude = 36.1540
+longitude = -95.9928
+# No scene set, so it uses the default: the original weathr scene ("world").

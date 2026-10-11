@@ -802,6 +802,30 @@ longitude = 0.0
     }
 
     #[test]
+    fn test_sample_config() {
+        let config: Config = toml::from_str(include_str!("../docs/sample-config.toml")).unwrap();
+        config.validate().unwrap();
+        assert_eq!(config.forecast_days(), 5);
+
+        let scenes: Vec<Option<&str>> = config
+            .locations
+            .iter()
+            .map(|loc| loc.scene.as_deref())
+            .collect();
+        assert_eq!(
+            scenes,
+            [
+                Some("suburb"),
+                Some("city"),
+                Some("lake-house"),
+                Some("ranch"),
+                Some("beach"),
+                None,
+            ]
+        );
+    }
+
+    #[test]
     fn test_forecast_days() {
         let config: Config = toml::from_str("forecast_days = 3").unwrap();
         assert_eq!(config.forecast_days(), 3);
