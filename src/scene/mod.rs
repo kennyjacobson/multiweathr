@@ -1,4 +1,5 @@
 pub mod overlay;
+pub mod ranch;
 pub mod world;
 
 use crate::render::TerminalRenderer;
@@ -10,6 +11,8 @@ use std::io;
 pub struct SceneContext<'a> {
     pub conditions: &'a WeatherConditions,
     pub palette: &'a Palette,
+    /// Current wind speed in m/s (0 until weather arrives).
+    pub wind_speed_ms: f64,
 }
 
 #[derive(Clone, Copy)]

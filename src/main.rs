@@ -190,13 +190,9 @@ async fn main() -> io::Result<()> {
         }
     };
 
-    if let Err(e) = renderer.init() {
-        eprintln!("\n{}\n", e.user_friendly_message());
-        std::process::exit(1);
-    };
-
     let (term_width, term_height) = renderer.get_size();
 
+    // Built before entering the alternate screen so its warnings stay readable.
     let mut app = app::App::new(
         &config,
         cli.simulate,
@@ -206,6 +202,11 @@ async fn main() -> io::Result<()> {
         term_height,
         theme_registry,
     );
+
+    if let Err(e) = renderer.init() {
+        eprintln!("\n{}\n", e.user_friendly_message());
+        std::process::exit(1);
+    };
 
     let result = tokio::select! {
         res = app.run(&mut renderer) => res,
