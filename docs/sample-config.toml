@@ -1,6 +1,12 @@
 # Sample multiweathr config that shows off every scene.
 # Copy it to ~/.config/weathr/config.toml (Linux) and swap in your own cities.
 
+# Hide the HUD (Heads Up Display) with weather details
+hide_hud = false
+
+# Run silently without startup messages (errors still shown)
+silent = false
+
 # Seconds to show each city before moving to the next one.
 rotate_seconds = 30
 
@@ -8,8 +14,13 @@ rotate_seconds = 30
 forecast_days = 5
 
 [units]
+# Temperature unit: "celsius" or "fahrenheit"
 temperature = "fahrenheit"
+
+# Wind speed unit: "kmh", "ms", "mph", or "kn"
 wind_speed = "mph"
+
+# Precipitation unit: "mm" or "inch"
 precipitation = "inch"
 
 [[locations]]

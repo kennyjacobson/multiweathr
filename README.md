@@ -232,15 +232,78 @@ New-Item -Path $env:APPDATA/weathr -Type Directory
 mkdir %APPDATA%/weathr
 ```
 
-Edit the config file at the appropriate path for your platform:
+Edit the config file at the appropriate path for your platform. This sample rotates through
+six cities and uses every scene (it's also in [`docs/sample-config.toml`](docs/sample-config.toml)):
 
 ```toml
+# Sample multiweathr config that shows off every scene.
+# Copy it to ~/.config/weathr/config.toml (Linux) and swap in your own cities.
+
 # Hide the HUD (Heads Up Display) with weather details
 hide_hud = false
 
 # Run silently without startup messages (errors still shown)
 silent = false
 
+# Seconds to show each city before moving to the next one.
+rotate_seconds = 30
+
+# Days of forecast on the second HUD line, starting with today. 0 hides it.
+forecast_days = 5
+
+[units]
+# Temperature unit: "celsius" or "fahrenheit"
+temperature = "fahrenheit"
+
+# Wind speed unit: "kmh", "ms", "mph", or "kn"
+wind_speed = "mph"
+
+# Precipitation unit: "mm" or "inch"
+precipitation = "inch"
+
+[[locations]]
+name = "Orange County, CA"
+latitude = 33.7175
+longitude = -117.8311
+scene = "suburb"
+
+[[locations]]
+name = "Salt Lake City, UT"
+latitude = 40.7608
+longitude = -111.8910
+scene = "city"
+
+[[locations]]
+name = "Lake Tahoe, CA"
+latitude = 38.9399
+longitude = -119.9772
+scene = "lake-house"
+
+[[locations]]
+name = "Austin, TX"
+latitude = 30.2672
+longitude = -97.7431
+scene = "ranch"
+
+[[locations]]
+name = "Huntington Beach, CA"
+latitude = 33.6595
+longitude = -117.9988
+scene = "beach"
+
+[[locations]]
+name = "Tulsa, OK"
+latitude = 36.1540
+longitude = -95.9928
+# No scene set, so it uses the default: the original weathr scene ("world").
+```
+
+### Single Location
+
+To show just one place, use a `[location]` table instead of `[[locations]]`. These options
+apply only to `[location]`; when `[[locations]]` is present, it is ignored.
+
+```toml
 [location]
 # Location coordinates (overridden if auto = true)
 latitude = 52.5200
@@ -262,16 +325,6 @@ display = "mixed"
 # Language for the resolved city name. "auto" uses the locale of the coordinates.
 # Accepts BCP-47 language tags: "en", "de", "ru", "ja", etc.
 # city_name_language = "auto"
-
-[units]
-# Temperature unit: "celsius" or "fahrenheit"
-temperature = "celsius"
-
-# Wind speed unit: "kmh", "ms", "mph", or "kn"
-wind_speed = "kmh"
-
-# Precipitation unit: "mm" or "inch"
-precipitation = "mm"
 ```
 
 ### Location Display Modes
@@ -320,8 +373,6 @@ scene = "world"          # optional; defaults to the theme's scene
 ```
 
 Press `n` / `→` for the next location and `p` / `←` for the previous one.
-
-For a full example that uses every scene, see [`docs/sample-config.toml`](docs/sample-config.toml).
 
 ### Scenes
 
