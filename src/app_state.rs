@@ -1,9 +1,33 @@
 use crate::config::LocationDisplay;
 use crate::weather::{
-    WeatherCondition, WeatherConditions, WeatherData, WeatherLocation, WeatherUnits,
+    DailyForecast, WeatherCondition, WeatherConditions, WeatherData, WeatherLocation, WeatherUnits,
     format_precipitation, format_temperature, format_wind_speed,
 };
+use crossterm::style::Color;
 use std::time::Instant;
+
+const FORECAST_SEPARATOR: &str = " | ";
+/// Nerd Font raindrop, shown before the chance of rain.
+const RAINDROP_ICON: char = '\u{e373}';
+
+/// Nerd Font weather icon for a condition, with the color to draw it in.
+/// Nerd Font icons take one terminal cell, so they line up with the text.
+fn forecast_icon(condition: WeatherCondition) -> (char, Color) {
+    match condition {
+        WeatherCondition::Clear => ('\u{e30d}', Color::Yellow),
+        WeatherCondition::PartlyCloudy => ('\u{e302}', Color::Yellow),
+        WeatherCondition::Cloudy | WeatherCondition::Overcast => ('\u{e312}', Color::Grey),
+        WeatherCondition::Fog => ('\u{e313}', Color::Grey),
+        WeatherCondition::Drizzle => ('\u{e31b}', Color::Blue),
+        WeatherCondition::Rain => ('\u{e318}', Color::Blue),
+        WeatherCondition::RainShowers => ('\u{e319}', Color::Blue),
+        WeatherCondition::FreezingRain => ('\u{e316}', Color::White),
+        WeatherCondition::SnowGrains => ('\u{e3ad}', Color::White),
+        WeatherCondition::Snow | WeatherCondition::SnowShowers => ('\u{e31a}', Color::White),
+        WeatherCondition::Thunderstorm => ('\u{e31d}', Color::Magenta),
+        WeatherCondition::ThunderstormHail => ('\u{e314}', Color::Magenta),
+    }
+}
 
 pub struct AppState {
     pub current_weather: Option<WeatherData>,
@@ -160,6 +184,59 @@ impl AppState {
         self.weather_info_needs_update = false;
     }
 
+    /// The forecast line drawn under the HUD, as colored pieces of text.
+    /// Days that would run past `max_width` characters are left off.
+    pub fn forecast_segments(&self, max_width: usize) -> Vec<(String, Color)> {
+        let Some(weather) = &self.current_weather else {
+            return Vec::new();
+        };
+
+        let mut segments = Vec::new();
+        let mut width = 0;
+
+        for (index, day) in weather.forecast.iter().enumerate() {
+            let mut day_segments = Vec::new();
+            if index > 0 {
+                day_segments.push((FORECAST_SEPARATOR.to_string(), Color::Cyan));
+            }
+            day_segments.extend(self.forecast_day_segments(index, day));
+
+            let day_width: usize = day_segments
+                .iter()
+                .map(|(text, _)| text.chars().count())
+                .sum();
+            if width + day_width > max_width {
+                break;
+            }
+            width += day_width;
+            segments.extend(day_segments);
+        }
+
+        segments
+    }
+
+    fn forecast_day_segments(&self, index: usize, day: &DailyForecast) -> Vec<(String, Color)> {
+        let label = if index == 0 {
+            "Today".to_string()
+        } else {
+            day.date.format("%a").to_string()
+        };
+        let (icon, icon_color) = forecast_icon(day.condition);
+        let (max, _) = format_temperature(day.temperature_max, self.units.temperature);
+        let (min, _) = format_temperature(day.temperature_min, self.units.temperature);
+
+        let mut segments = vec![
+            (format!("{} ", label), Color::Cyan),
+            (format!("{} ", icon), icon_color),
+            (format!("{:.0}°/{:.0}°", max, min), Color::Cyan),
+        ];
+        if let Some(probability) = day.precipitation_probability {
+            segments.push((format!(" {} ", RAINDROP_ICON), Color::Blue));
+            segments.push((format!("{}%", probability), Color::Cyan));
+        }
+        segments
+    }
+
     pub fn should_show_sun(&self) -> bool {
         if !self.weather_conditions.sun.is_day {
             return false;
@@ -271,6 +348,7 @@ mod tests {
             moon_phase: Some(0.5),
             timestamp: "2024-01-01T12:00:00Z".to_string(),
             attribution: "".to_string(),
+            forecast: Vec::new(),
             sun: CelestialEvents::from_bool(true),
         };
         app.update_weather(weather);
@@ -412,5 +490,63 @@ mod tests {
                 .contains("Location: 34.08°N, 84.29°W")
         );
         assert!(!app.cached_weather_info.contains("("));
+    }
+
+    fn app_with_forecast() -> AppState {
+        let mut app = create_app_state(33.6477, -117.6219);
+        let day = |d: u32, condition, max, min, probability| DailyForecast {
+            date: chrono::NaiveDate::from_ymd_opt(2026, 10, d).unwrap(),
+            condition,
+            temperature_max: max,
+            temperature_min: min,
+            precipitation_probability: probability,
+        };
+        let mut weather = app.current_weather.clone().unwrap();
+        weather.forecast = vec![
+            day(11, WeatherCondition::Rain, 20.2, 15.7, Some(78)),
+            day(12, WeatherCondition::Drizzle, 16.6, 12.6, None),
+            day(13, WeatherCondition::Clear, 22.3, 12.0, Some(0)),
+        ];
+        app.update_weather(weather);
+        app
+    }
+
+    fn segments_text(segments: &[(String, Color)]) -> String {
+        segments.iter().map(|(text, _)| text.as_str()).collect()
+    }
+
+    #[test]
+    fn test_forecast_line() {
+        let app = app_with_forecast();
+        let text = segments_text(&app.forecast_segments(200));
+
+        assert_eq!(
+            text,
+            "Today \u{e318} 20°/16° \u{e373} 78% | Mon \u{e31b} 17°/13° | Tue \u{e30d} 22°/12° \u{e373} 0%"
+        );
+    }
+
+    #[test]
+    fn test_forecast_drops_days_that_do_not_fit() {
+        let app = app_with_forecast();
+        let full = segments_text(&app.forecast_segments(200));
+        let first_day = "Today \u{e318} 20°/16° \u{e373} 78%";
+
+        let text = segments_text(&app.forecast_segments(full.chars().count() - 1));
+        assert!(text.starts_with(first_day));
+        assert!(text.contains("Mon"));
+        assert!(!text.contains("Tue"));
+
+        assert!(
+            app.forecast_segments(first_day.chars().count() - 1)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn test_forecast_empty_without_weather() {
+        let mut app = app_with_forecast();
+        app.set_location(app.location, None);
+        assert!(app.forecast_segments(200).is_empty());
     }
 }

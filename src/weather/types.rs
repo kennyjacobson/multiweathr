@@ -1,4 +1,4 @@
-use chrono::NaiveTime;
+use chrono::{NaiveDate, NaiveTime};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -214,6 +214,20 @@ pub struct WeatherData {
     pub moon_phase: Option<f64>,
     pub timestamp: String,
     pub attribution: String,
+    /// Daily forecast, starting with today. Empty when the provider has none.
+    #[serde(default)]
+    pub forecast: Vec<DailyForecast>,
+}
+
+/// One day of the forecast. Temperatures are in Celsius, like `WeatherData`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DailyForecast {
+    pub date: NaiveDate,
+    pub condition: WeatherCondition,
+    pub temperature_max: f64,
+    pub temperature_min: f64,
+    /// Highest chance of precipitation during the day, in percent.
+    pub precipitation_probability: Option<u8>,
 }
 
 #[derive(Debug, Clone, Copy, serde::Deserialize)]

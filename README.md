@@ -1,8 +1,31 @@
-# weathr
+# multiweathr
 
-[![Crates.io](https://img.shields.io/crates/v/weathr.svg)](https://crates.io/crates/weathr)
-[![Downloads](https://img.shields.io/crates/d/weathr.svg)](https://crates.io/crates/weathr)
-[![License](https://img.shields.io/crates/l/weathr.svg)](https://github.com/veirt/weathr/blob/main/LICENSE)
+A fork of [weathr](https://github.com/Veirt/weathr) by Veirt that rotates through several
+cities, each with its own animated scene, and adds a multi-day forecast to the HUD. I made it
+to keep the weather where my remote teammates live on screen.
+
+> **Heads-up: the features added in this fork were "vibe coded"** — written with an AI coding
+> assistant (Claude Code) and reviewed and tested by me. Everything from the original weathr
+> is Veirt's work. This fork isn't intended to be merged upstream; if you want the original,
+> head to [Veirt/weathr](https://github.com/Veirt/weathr).
+
+### What this fork adds
+
+- **Rotating locations**: list several cities and the app cycles through them. `n`/`p`
+  switch by hand. See [Rotating Locations](#rotating-locations).
+- **A scene per city**: five new scenes (`ranch`, `lake-house`, `city`, `suburb`, `beach`)
+  with day and night colors. Windmills, sailboats, waves and palm trees react to the real
+  wind speed. See [Scenes](#scenes).
+- **Forecast row**: a second HUD line with the next few days, starting with today: an icon,
+  the high/low and the chance of rain. See [Forecast](#forecast).
+
+The binary is still called `weathr` and uses the same config file, so it replaces the
+original if both are installed.
+
+---
+
+The rest of this README is the original weathr documentation, with the fork's options added.
+Install methods other than [Install this fork](#install-this-fork) install the original weathr.
 
 A terminal weather app with ASCII animations driven by real-time weather data.
 
@@ -38,6 +61,25 @@ Features real-time weather from Open-Meteo with animated rain, snow, thunderstor
 ![Winget](https://img.shields.io/winget/v/Veirt.weathr)
 
 ## Installation
+
+### Install this fork
+
+You need Rust installed (on Arch: `sudo pacman -S rust`).
+
+```bash
+git clone https://github.com/kennyjacobson/multiweathr.git
+cd multiweathr
+cargo install --path .
+```
+
+`cargo install` puts `weathr` in `~/.cargo/bin`. If typing `weathr` says "command not found",
+add that folder to your PATH, for example in `~/.bashrc`:
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+```
+
+Run `cargo install --path .` again after pulling changes to update it.
 
 ### Quick Install (macOS, Linux, FreeBSD)
 
@@ -279,6 +321,42 @@ scene = "world"          # optional; defaults to the theme's scene
 
 Press `n` / `→` for the next location and `p` / `←` for the previous one.
 
+### Scenes
+
+Set `scene` on a `[[locations]]` entry to pick what's drawn behind the weather.
+
+| Scene        | What's in it                                                       | Reacts to wind                    |
+| :----------- | :----------------------------------------------------------------- | :-------------------------------- |
+| `world`      | The original weathr scene (the default)                            | —                                 |
+| `ranch`      | Yellow grass, prickly pear, longhorns, a windmill                  | The windmill spins with the wind  |
+| `lake-house` | An A-frame, pines, mountains, a lake with a sailboat               | Waves drift and the boat speeds up |
+| `city`       | A capitol building, downtown towers, a passing light-rail train    | —                                 |
+| `suburb`     | Stucco houses with tile roofs, jacarandas, a mountain, passing cars | Palms sway                        |
+| `beach`      | A pier, lifeguard tower, umbrellas, surfboards, a surfer           | Swells roll faster; palms sway    |
+
+```toml
+[[locations]]
+name = "Huntington Beach, CA"
+latitude = 33.6595
+longitude = -117.9988
+scene = "beach"
+```
+
+### Forecast
+
+A second HUD line shows the daily forecast, starting with today: the day, a weather icon,
+the high/low temperature and the chance of rain.
+
+```toml
+# Days of forecast to show, from 0 (hidden) to 16. Default: 5
+forecast_days = 5
+```
+
+Days that don't fit the terminal width are left off. The icons come from
+[Nerd Fonts](https://www.nerdfonts.com/), so your terminal needs a Nerd Font (Omarchy ships
+one by default); otherwise they show as boxes. The forecast is available with the
+default Open-Meteo provider only.
+
 ## Usage
 
 Run with real-time weather:
@@ -338,6 +416,8 @@ weathr --imperial --auto-location
 
 - `q` or `Q` - Quit
 - `Ctrl+C` - Exit
+- `n` or `→` - Next location (with rotating locations)
+- `p` or `←` - Previous location (with rotating locations)
 
 ### Environment Variables
 
@@ -390,5 +470,8 @@ Data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), l
 - **Airplane**: Joan G. Stark
 - **Sun**: Hayley Jane Wakenshaw (Flump)
 - **Moon**: Joan G. Stark
+
+The ASCII art for this fork's scenes (`ranch`, `lake-house`, `city`, `suburb`, `beach`) was
+made for this fork.
 
 _Note: If any ASCII art is uncredited or misattributed, it belongs to the original owner._

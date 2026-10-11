@@ -205,6 +205,7 @@ impl WeatherProvider for MetOfficeProvider {
             moon_phase: Some(0.5),
             timestamp: current_weather.time,
             attribution: self.get_attribution().to_string(),
+            forecast: Vec::new(),
         };
 
         // A provider should ask something else if it doesn't have the data, the provider shouldn't have to care about

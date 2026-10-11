@@ -12,6 +12,7 @@ pub const ENV_LATITUDE: &str = "WEATHR_LATITUDE";
 pub const ENV_LONGITUDE: &str = "WEATHR_LONGITUDE";
 pub const DEFAULT_THEME: &str = "default";
 pub const DEFAULT_ROTATE_SECONDS: u64 = 30;
+pub const DEFAULT_FORECAST_DAYS: u8 = 5;
 
 #[derive(Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -42,6 +43,9 @@ pub struct Config {
     /// Several locations to rotate through. When empty, `location` is used.
     #[serde(default)]
     pub locations: Vec<RotatingLocation>,
+    /// Days of forecast shown under the HUD, starting with today. 0 hides it.
+    #[serde(default)]
+    pub forecast_days: Option<u8>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -197,6 +201,10 @@ impl Config {
 
     pub fn rotate_seconds(&self) -> u64 {
         self.rotate_seconds.unwrap_or(DEFAULT_ROTATE_SECONDS)
+    }
+
+    pub fn forecast_days(&self) -> u8 {
+        self.forecast_days.unwrap_or(DEFAULT_FORECAST_DAYS)
     }
 
     pub fn normalized_theme(&self) -> &str {
@@ -790,6 +798,16 @@ longitude = 0.0
         let config: Config = toml::from_str(toml_content).unwrap();
         assert!(!config.is_rotating());
         assert_eq!(config.rotate_seconds(), DEFAULT_ROTATE_SECONDS);
+        assert_eq!(config.forecast_days(), DEFAULT_FORECAST_DAYS);
+    }
+
+    #[test]
+    fn test_forecast_days() {
+        let config: Config = toml::from_str("forecast_days = 3").unwrap();
+        assert_eq!(config.forecast_days(), 3);
+
+        let config: Config = toml::from_str("forecast_days = 0").unwrap();
+        assert_eq!(config.forecast_days(), 0);
     }
 
     #[test]

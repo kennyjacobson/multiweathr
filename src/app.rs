@@ -145,6 +145,7 @@ fn generate_offline_weather(rng: &mut impl rand::Rng) -> WeatherData {
         moon_phase: Some(0.5),
         timestamp: now.format("%Y-%m-%dT%H:%M:%S").to_string(),
         attribution: "".to_string(),
+        forecast: Vec::new(),
     }
 }
 
@@ -272,6 +273,7 @@ impl App {
                 moon_phase: Some(0.5),
                 timestamp: "simulated".to_string(),
                 attribution: "".to_string(),
+                forecast: Vec::new(),
             };
 
             for slot in &mut slots {
@@ -286,7 +288,9 @@ impl App {
                 .unwrap_or(Provider::default());
 
             let provider: Arc<dyn WeatherProvider> = match wanted_provider {
-                Provider::OpenMeteo => Arc::new(OpenMeteoProvider::new()),
+                Provider::OpenMeteo => {
+                    Arc::new(OpenMeteoProvider::new().with_forecast_days(config.forecast_days()))
+                }
                 Provider::MetOffice => {
                     let provider_config = {
                         if let Some(provider_config) = config.provider.get(&wanted_provider) {
@@ -504,6 +508,13 @@ impl App {
                     &self.state.cached_weather_info,
                     crossterm::style::Color::Cyan,
                 )?;
+
+                let mut x = 2;
+                let max_width = term_width.saturating_sub(4) as usize;
+                for (text, color) in self.state.forecast_segments(max_width) {
+                    renderer.render_line_colored(x, 2, &text, color)?;
+                    x += text.chars().count() as u16;
+                }
             }
 
             let attribution_x = if term_width > attribution.len() as u16 {

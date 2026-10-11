@@ -1,5 +1,5 @@
 use crate::weather::provider::WeatherProviderResponse;
-use crate::weather::types::{WeatherCondition, WeatherData};
+use crate::weather::types::{DailyForecast, WeatherCondition, WeatherData};
 
 pub struct WeatherNormalizer;
 
@@ -17,6 +17,17 @@ impl WeatherNormalizer {
             moon_phase: response.moon_phase,
             timestamp: response.timestamp,
             attribution: response.attribution,
+            forecast: response
+                .forecast
+                .into_iter()
+                .map(|day| DailyForecast {
+                    date: day.date,
+                    condition: Self::wmo_code_to_condition(day.weather_code),
+                    temperature_max: day.temperature_max,
+                    temperature_min: day.temperature_min,
+                    precipitation_probability: day.precipitation_probability,
+                })
+                .collect(),
         }
     }
 
@@ -104,6 +115,13 @@ mod tests {
             moon_phase: Some(0.5),
             timestamp: "2024-01-01T12:00".to_string(),
             attribution: "".to_string(),
+            forecast: vec![crate::weather::provider::DailyForecastResponse {
+                date: chrono::NaiveDate::from_ymd_opt(2024, 1, 2).unwrap(),
+                weather_code: 71,
+                temperature_max: 3.0,
+                temperature_min: -4.0,
+                precipitation_probability: Some(60),
+            }],
         };
 
         let data = WeatherNormalizer::normalize(response);
@@ -112,5 +130,8 @@ mod tests {
         assert_eq!(data.temperature, 20.5);
         assert!(data.sun.is_day);
         assert_eq!(data.moon_phase, Some(0.5));
+        assert_eq!(data.forecast.len(), 1);
+        assert_eq!(data.forecast[0].condition, WeatherCondition::Snow);
+        assert_eq!(data.forecast[0].precipitation_probability, Some(60));
     }
 }
