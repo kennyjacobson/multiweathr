@@ -1,7 +1,10 @@
 mod style;
 
 use crate::render::TerminalRenderer;
-use crate::scene::art::{art_height, art_width, hash, place_outward, render_art_opaque};
+use crate::scene::art::{
+    MountainColors, art_height, art_width, hash, place_outward, render_art_clipped,
+    render_art_opaque, render_mountains,
+};
 use crate::scene::{ChimneyPosition, Scene, SceneContext, SceneLayout};
 use std::io;
 use std::sync::Mutex;
@@ -18,8 +21,6 @@ const SAILBOAT_ASCII: &str = include_str!("assets/sailboat.txt");
 const SHORE_ROWS: u16 = 2;
 /// Tallest the mountains get, in rows above the shoreline.
 const MOUNTAIN_MAX_HEIGHT: u16 = 14;
-/// Average columns between mountain peaks.
-const PEAK_SPACING: u16 = 18;
 /// Waves drift this many columns per second on a calm day...
 const WAVE_DRIFT_CALM: f64 = 0.3;
 /// ...plus this many per m/s of wind...
@@ -107,52 +108,6 @@ impl LakeHouseScene {
         (cabin_x, cabin_y)
     }
 
-    fn render_mountains(
-        &self,
-        renderer: &mut TerminalRenderer,
-        ground_y: u16,
-        style: &LakeHouseSceneStyle,
-    ) -> io::Result<()> {
-        // Leave the upper part of the sky clear for the sun, moon and clouds.
-        let max_height = MOUNTAIN_MAX_HEIGHT.min(ground_y * 11 / 20);
-        if max_height == 0 {
-            return Ok(());
-        }
-
-        for x in 0..self.width {
-            let height = ridge_height(x, max_height);
-            let left = ridge_height(x.saturating_sub(1), max_height);
-            let right = ridge_height(x + 1, max_height);
-            let top = ground_y - height;
-
-            // Peaks are two columns wide, so their tops draw as `/\`.
-            let ridge = if right > height || (left < height && right == height) {
-                '/'
-            } else if left > height || (right < height && left == height) {
-                '\\'
-            } else {
-                '_'
-            };
-            let snowy = height + 2 >= max_height;
-            let ridge_color = if snowy { style.snow } else { style.mountain };
-            renderer.render_char(x, top, ridge, ridge_color)?;
-
-            // Fill the slope so stars and clouds don't show through it.
-            for y in top + 1..ground_y {
-                let (ch, color) = if snowy && y <= top + 2 {
-                    ('.', style.snow)
-                } else if hash(x, y) < 10 {
-                    ('.', style.mountain_texture)
-                } else {
-                    (' ', style.mountain)
-                };
-                renderer.render_char(x, y, ch, color)?;
-            }
-        }
-
-        Ok(())
-    }
-
     fn render_shore_and_water(
         &self,
         renderer: &mut TerminalRenderer,
@@ -221,26 +176,11 @@ impl LakeHouseScene {
 
         // Hull sits on the third water row.
         let y = ground_y + SHORE_ROWS + 3 - (art_height(SAILBOAT_ASCII) - 1);
-        for (i, line) in SAILBOAT_ASCII.lines().enumerate() {
-            let chars: Vec<char> = line.chars().collect();
-            let Some(first) = chars.iter().position(|&ch| ch != ' ') else {
-                continue;
-            };
-            for (j, &ch) in chars.iter().enumerate().skip(first) {
-                let col = x + j as i32;
-                if col < 0 || col >= self.width as i32 {
-                    continue;
-                }
-                let color = match (i, ch) {
-                    (3, _) => style.hull,
-                    (_, '|') => style.trim,
-                    _ => style.sail,
-                };
-                renderer.render_char(col as u16, y + i as u16, ch, color)?;
-            }
-        }
-
-        Ok(())
+        render_art_clipped(renderer, SAILBOAT_ASCII, x, y, |row, ch| match (row, ch) {
+            (3, _) => style.hull,
+            (_, '|') => style.trim,
+            _ => style.sail,
+        })
     }
 
     fn render_prop(
@@ -308,7 +248,19 @@ impl Scene for LakeHouseScene {
         let (cabin_x, cabin_y) = self.cabin_origin(ground_y);
         let style = LakeHouseSceneStyle::resolve(ctx);
 
-        self.render_mountains(renderer, ground_y, &style)?;
+        // Leave the upper part of the sky clear for the sun, moon and clouds.
+        let mountain_height = MOUNTAIN_MAX_HEIGHT.min(ground_y * 11 / 20);
+        render_mountains(
+            renderer,
+            self.width,
+            ground_y,
+            mountain_height,
+            &MountainColors {
+                ridge: style.mountain,
+                texture: style.mountain_texture,
+                snow: style.snow,
+            },
+        )?;
         self.render_shore_and_water(renderer, ground_y, ctx.wind_speed_ms, &style)?;
 
         render_art_opaque(
@@ -345,27 +297,6 @@ impl Scene for LakeHouseScene {
     }
 }
 
-/// Height of the mountain ridge at column `x`, from 1 to `max`.
-/// Peaks sit roughly every `PEAK_SPACING` columns with varied heights, and
-/// each slope drops one row per column so it draws as a clean `/` or `\`.
-fn ridge_height(x: u16, max: u16) -> u16 {
-    let max = max as i32;
-    let slot = x / PEAK_SPACING;
-    let mut height = 1;
-    for s in slot.saturating_sub(2)..=slot + 2 {
-        let peak_x = (s * PEAK_SPACING) as i32 + (hash(s, 7) % PEAK_SPACING as u32) as i32;
-        let peak_height = max / 2 + hash(s, 9) as i32 % (max - max / 2 + 1);
-        // Distance from the two-column peak at peak_x and peak_x + 1.
-        let distance = if (x as i32) <= peak_x {
-            peak_x - x as i32
-        } else {
-            x as i32 - peak_x - 1
-        };
-        height = height.max(peak_height - distance);
-    }
-    height.clamp(1, max) as u16
-}
-
 /// How many columns per second the waves drift at this wind speed.
 fn wave_drift(wind_speed_ms: f64) -> f64 {
     (WAVE_DRIFT_CALM + wind_speed_ms * WAVE_DRIFT_PER_MS).min(WAVE_DRIFT_MAX)
@@ -383,14 +314,6 @@ mod tests {
             .unwrap();
         let pipe = row.chars().nth(LakeHouseScene::CHIMNEY_X_OFFSET as usize);
         assert_eq!(pipe, Some('['));
-    }
-
-    #[test]
-    fn ridge_stays_in_bounds() {
-        for x in 0..1000 {
-            let height = ridge_height(x, 8);
-            assert!((1..=8).contains(&height));
-        }
     }
 
     #[test]

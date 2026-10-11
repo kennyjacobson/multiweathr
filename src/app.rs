@@ -3,6 +3,7 @@ use crate::app_state::AppState;
 use crate::config::{Config, LocationDisplay, Provider};
 use crate::error::WeatherError;
 use crate::render::TerminalRenderer;
+use crate::scene::city::CityScene;
 use crate::scene::lake_house::LakeHouseScene;
 use crate::scene::overlay::OverlayRegistry;
 use crate::scene::ranch::RanchScene;
@@ -183,6 +184,7 @@ impl App {
         scenes.register(Box::new(WorldScene::new(term_width, term_height)));
         scenes.register(Box::new(RanchScene::new(term_width, term_height)));
         scenes.register(Box::new(LakeHouseScene::new(term_width, term_height)));
+        scenes.register(Box::new(CityScene::new(term_width, term_height)));
 
         let overlays = OverlayRegistry::new();
         let bindings = resolve_theme_bindings(&themes, &scenes, &overlays);
