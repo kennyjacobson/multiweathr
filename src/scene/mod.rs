@@ -3,6 +3,7 @@ pub mod city;
 pub mod lake_house;
 pub mod overlay;
 pub mod ranch;
+pub mod suburb;
 pub mod world;
 
 use crate::render::TerminalRenderer;
